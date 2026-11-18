@@ -1,6 +1,8 @@
 CC := clang
 # The C++ compiler of the same family (clang-19 -> clang++-19, gcc -> g++), for the C++ header test.
 CXX := $(subst clang,clang++,$(subst gcc,g++,$(CC)))
+# The differential test uses gcov function coverage, which needs GCC's libgcov (clang's profile runtime may be absent).
+GCOV_CC ?= gcc
 AR ?= ar
 BUILD_DIR := build
 
@@ -39,7 +41,7 @@ C23_TEST := $(if $(shell command -v $(C23_CC) 2>/dev/null),test-c23)
 LIB_SOURCES := src/qoamax.h src/qoamax_plain.h src/qoamax.c src/qoamax_lanes.h src/qoamax_beam.h
 SHARED_LIB := $(BUILD_DIR)/libqoamax.so.$(VERSION)
 
-.PHONY: all debug release lib test test-c23 test-build-systems install uninstall clean
+.PHONY: all debug release lib test test-c23 test-build-systems difftest install uninstall clean
 
 all: debug release
 
@@ -130,6 +132,29 @@ $(BUILD_DIR)/test_cpp: test/test_cpp.cpp test/signal.h $(BUILD_DIR)/qoamax-test.
 
 $(BUILD_DIR)/wavgen: test/wavgen.c test/signal.h | $(BUILD_DIR)
 	$(CC) $(TEST_CFLAGS) test/wavgen.c -o $@
+
+# SIMD vs. scalar decoder differential test matrix. The matrix dimensions (efforts, materials, frame lengths) are
+# config-driven in test/difftest_config.h, and the coverage report discovers the decoder functions from gcov. Built
+# with GCC + gcov so per-function coverage is available without extra runtime packages. -O1 keeps every thin wrapper
+# (e.g. qoamax_decoder_read) its own coverage entry; the whole matrix still finishes inside its 60 s budget.
+DIFTEST_DIR := $(BUILD_DIR)/difftest
+DIFTEST_BIN := $(DIFTEST_DIR)/difftest
+DIFTEST_COVERAGE := $(DIFTEST_DIR)/difftest.gcov.json.gz
+DIFTEST_SIDECAR := $(DIFTEST_DIR)/difftest_sidecar.json
+
+difftest: $(DIFTEST_COVERAGE)
+	@python3 test/difftest_coverage.py $(DIFTEST_COVERAGE) $(DIFTEST_SIDECAR)
+
+$(DIFTEST_BIN): test/difftest.c test/difftest_config.h test/difftest_materials.h $(LIB_SOURCES) | $(DIFTEST_DIR)
+	$(GCOV_CC) -std=c23 -D_POSIX_C_SOURCE=199309L -O1 -g -Wall -Wextra --coverage -I src test/difftest.c -lm -o $@
+
+$(DIFTEST_COVERAGE): $(DIFTEST_BIN)
+	@rm -f $(DIFTEST_DIR)/*.gcda
+	cd $(DIFTEST_DIR) && ./difftest
+	cd $(DIFTEST_DIR) && gcov -j -f -o . difftest >/dev/null
+
+$(DIFTEST_DIR):
+	mkdir -p $@
 
 clean:
 	rm -rf $(BUILD_DIR)

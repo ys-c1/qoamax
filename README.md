@@ -29,6 +29,16 @@ Use `make release` to only build `build/qoamax`, use `make test` to run the test
 
 `make install` installs the CLI, the library, its headers and a pkg-config file (`PREFIX=/usr/local`, `DESTDIR`).
 
+`make difftest` builds and runs the SIMD vs. scalar decoder differential test matrix (`test/difftest.c`). For every
+encoder effort × test material (sine, noise, music) × frame length, it decodes the same slices with the scalar
+reference (`qoamax_decode_slice`), every runnable SIMD decode kernel (the lane variants, directly and through
+`qoamax_decode_streams`), and the file-format decoder, and compares the output sample by sample. It fails unless the
+number of differing samples and the maximum sample difference are both zero, and prints a gcov per-function coverage
+report of the decoder (functions not covered, and SIMD variants the CPU cannot run, are listed separately). The matrix
+and the report are config-driven (`test/difftest_config.h`): adding an effort, material, frame length or a new decode
+function needs no changes to the test driver. The whole matrix runs in well under a minute. It is built with GCC and
+gcov (`GCOV_CC`), as it needs a coverage runtime.
+
 `make lib` builds the static and shared library (`build/libqoamax.a`, `build/libqoamax.so`).
 CMake and Meson can be used to include the library too, see [Using the library](#using-the-library).
 
